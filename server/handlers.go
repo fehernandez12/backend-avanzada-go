@@ -1,75 +1,122 @@
 package server
 
 import (
+	"backend-avanzada/api"
 	"backend-avanzada/models"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/gorilla/mux"
 )
 
-func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
-	people := []*models.PersonResponse{}
-	for _, v := range s.DB {
-		people = append(people, &models.PersonResponse{
-			Nombre:        v.Nombre,
-			Edad:          v.Edad,
-			FechaCreacion: fmt.Sprint(v.FechaCreacion),
-		})
-	}
-	result, err := json.Marshal(people)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+func (s *Server) HandlePeople(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.handleGet(w, r)
+		return
+	case http.MethodPost:
+		s.handlePost(w, r)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(result)
 }
 
-func (s *Server) handleGetWithId(w http.ResponseWriter, r *http.Request) {
-	matches := PeopleRegexWithId.FindStringSubmatch(r.URL.Path)
-	id, err := strconv.ParseInt(matches[1], 10, 32)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-	}
-	p, exists := s.DB[int(id)]
-	if !exists {
-		w.WriteHeader(http.StatusNotFound)
+func (s *Server) HandlePeopleWithId(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.handleGetWithId(w, r)
+		return
+	case http.MethodPut:
+		s.handlePut(w, r)
+		return
+	case http.MethodDelete:
+		s.handleDelete(w, r)
 		return
 	}
-	resp := &models.PersonResponse{
-		Nombre:        p.Nombre,
-		Edad:          p.Edad,
-		FechaCreacion: fmt.Sprint(p.FechaCreacion),
-	}
-	response, err := json.Marshal(resp)
+}
+
+func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	result := []*api.PersonResponse{}
+	people, err := s.PeopleRepository.FindAll()
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		s.HandleError(w, http.StatusInternalServerError, r.URL.Path, err)
+		return
+	}
+	for _, v := range people {
+		result = append(result, &api.PersonResponse{
+			ID:            int(v.ID),
+			Nombre:        v.Name,
+			Edad:          v.Age,
+			FechaCreacion: v.CreatedAt.String(),
+		})
+	}
+	response, err := json.Marshal(result)
+	if err != nil {
+		s.HandleError(w, http.StatusInternalServerError, r.URL.Path, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(response)
+	s.logger.Info(http.StatusOK, r.URL.Path, start)
+}
+
+func (s *Server) handleGetWithId(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	vars := mux.Vars(r)
+	id, err := strconv.ParseInt(vars["id"], 10, 32)
+	if err != nil {
+		s.HandleError(w, http.StatusBadRequest, r.URL.Path, err)
+		return
+	}
+	p, err := s.PeopleRepository.FindById(int(id))
+	if p == nil && err == nil {
+		s.HandleError(w, http.StatusNotFound, r.URL.Path, fmt.Errorf("person with id %d not found", id))
+		return
+	}
+	if err != nil {
+		s.HandleError(w, http.StatusInternalServerError, r.URL.Path, err)
+		return
+	}
+	resp := &api.PersonResponse{
+		ID:            int(p.ID),
+		Nombre:        p.Name,
+		Edad:          p.Age,
+		FechaCreacion: p.CreatedAt.String(),
+	}
+	response, err := json.Marshal(resp)
+	if err != nil {
+		s.HandleError(w, http.StatusInternalServerError, r.URL.Path, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(response)
+	s.logger.Info(http.StatusOK, r.URL.Path, start)
 }
 
 func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
-	var p models.PersonRequest
+	var p api.PersonRequest
 	err := json.NewDecoder(r.Body).Decode(&p)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 	person := &models.Person{
-		Id:            len(s.DB) + 1,
-		Nombre:        p.Nombre,
-		Edad:          int(p.Edad),
-		FechaCreacion: time.Now(),
+		Name: p.Nombre,
+		Age:  int(p.Edad),
 	}
-	s.DB[person.Id] = person
-	pResponse := &models.PersonResponse{
-		Nombre:        person.Nombre,
-		Edad:          person.Edad,
-		FechaCreacion: fmt.Sprint(person.FechaCreacion),
+	person, err = s.PeopleRepository.Save(person)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	pResponse := &api.PersonResponse{
+		ID:            int(person.ID),
+		Nombre:        person.Name,
+		Edad:          person.Age,
+		FechaCreacion: person.CreatedAt.String(),
 	}
 	result, err := json.Marshal(pResponse)
 	if err != nil {
@@ -82,28 +129,38 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePut(w http.ResponseWriter, r *http.Request) {
-	var p models.PersonRequest
+	var p api.PersonRequest
 	err := json.NewDecoder(r.Body).Decode(&p)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	matches := PeopleRegexWithId.FindStringSubmatch(r.URL.Path)
-	id, err := strconv.ParseInt(matches[1], 10, 32)
+	vars := mux.Vars(r)
+	id, err := strconv.ParseInt(vars["id"], 10, 32)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 	}
-	person, exists := s.DB[int(id)]
-	if !exists {
+	person, err := s.PeopleRepository.FindById(int(id))
+	if person == nil && err == nil {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	person.Nombre = p.Nombre
-	person.Edad = int(p.Edad)
-	pResponse := &models.PersonResponse{
-		Nombre:        person.Nombre,
-		Edad:          person.Edad,
-		FechaCreacion: fmt.Sprint(person.FechaCreacion),
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	person.Name = p.Nombre
+	person.Age = int(p.Edad)
+	person, err = s.PeopleRepository.Save(person)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	pResponse := &api.PersonResponse{
+		ID:            int(person.ID),
+		Nombre:        person.Name,
+		Edad:          person.Age,
+		FechaCreacion: person.CreatedAt.String(),
 	}
 	result, err := json.Marshal(pResponse)
 	if err != nil {
@@ -116,16 +173,24 @@ func (s *Server) handlePut(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
-	matches := PeopleRegexWithId.FindStringSubmatch(r.URL.Path)
-	id, err := strconv.ParseInt(matches[1], 10, 32)
+	vars := mux.Vars(r)
+	id, err := strconv.ParseInt(vars["id"], 10, 32)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 	}
-	p, exists := s.DB[int(id)]
-	if !exists {
+	person, err := s.PeopleRepository.FindById(int(id))
+	if person == nil && err == nil {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	delete(s.DB, p.Id)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	err = s.PeopleRepository.Delete(person)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
