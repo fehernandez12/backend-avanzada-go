@@ -20,12 +20,15 @@ type Server struct {
 	Config           *config.Config
 	Handler          http.Handler
 	PeopleRepository repository.Repository[models.Person]
+	KillRepository   repository.Repository[models.Kill]
 	logger           *logger.Logger
+	taskQueue        *TaskQueue
 }
 
 func NewServer() *Server {
 	s := &Server{
-		logger: logger.NewLogger(),
+		logger:    logger.NewLogger(),
+		taskQueue: NewTaskQueue(),
 	}
 	var config config.Config
 	configFile, err := os.ReadFile("config/config.json")
@@ -63,7 +66,12 @@ func (s *Server) initDB() {
 		}
 		s.DB = db
 	case "postgres":
-		dsn := "host=ep-snowy-sunset-a2d8ilrq.eu-central-1.aws.neon.tech user=neondb_owner password=npg_KlJRLSnBT65j dbname=neondb sslmode=require"
+		dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable",
+			os.Getenv("POSTGRES_HOST"),
+			os.Getenv("POSTGRES_USER"),
+			os.Getenv("POSTGRES_PASSWORD"),
+			os.Getenv("POSTGRES_DB"),
+		)
 		db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 		if err != nil {
 			s.logger.Fatal(err)
@@ -71,6 +79,7 @@ func (s *Server) initDB() {
 		s.DB = db
 	}
 	fmt.Println("Aplicando migraciones...")
-	s.DB.AutoMigrate(&models.Person{})
+	s.DB.AutoMigrate(&models.Person{}, &models.Kill{})
+	s.KillRepository = repository.NewKillRepository(s.DB)
 	s.PeopleRepository = repository.NewPeopleRepository(s.DB)
 }

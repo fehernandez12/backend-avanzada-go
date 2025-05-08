@@ -15,10 +15,10 @@ import (
 func (s *Server) HandlePeople(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		s.handleGet(w, r)
+		s.handleGetAllPeople(w, r)
 		return
 	case http.MethodPost:
-		s.handlePost(w, r)
+		s.handleCreatePerson(w, r)
 		return
 	}
 }
@@ -26,32 +26,43 @@ func (s *Server) HandlePeople(w http.ResponseWriter, r *http.Request) {
 func (s *Server) HandlePeopleWithId(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		s.handleGetWithId(w, r)
+		s.handleGetPersonById(w, r)
 		return
 	case http.MethodPut:
-		s.handlePut(w, r)
+		s.handleEditPerson(w, r)
 		return
 	case http.MethodDelete:
-		s.handleDelete(w, r)
+		s.handleDeletePerson(w, r)
 		return
 	}
 }
 
-func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleGetAllPeople(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
-	result := []*api.PersonResponse{}
+	result := []*api.PersonResponseDto{}
 	people, err := s.PeopleRepository.FindAll()
 	if err != nil {
 		s.HandleError(w, http.StatusInternalServerError, r.URL.Path, err)
 		return
 	}
 	for _, v := range people {
-		result = append(result, &api.PersonResponse{
+		alive := false
+		kill, err := s.KillRepository.FindById(int(v.ID))
+		if kill == nil && err == nil {
+			alive = true
+		}
+		dto := &api.PersonResponseDto{
 			ID:            int(v.ID),
 			Nombre:        v.Name,
 			Edad:          v.Age,
 			FechaCreacion: v.CreatedAt.String(),
-		})
+		}
+		if alive {
+			dto.Estado = "Vivo"
+		} else {
+			dto.Estado = "Muerto"
+		}
+		result = append(result, dto)
 	}
 	response, err := json.Marshal(result)
 	if err != nil {
@@ -63,7 +74,7 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
 	s.logger.Info(http.StatusOK, r.URL.Path, start)
 }
 
-func (s *Server) handleGetWithId(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleGetPersonById(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	vars := mux.Vars(r)
 	id, err := strconv.ParseInt(vars["id"], 10, 32)
@@ -80,7 +91,7 @@ func (s *Server) handleGetWithId(w http.ResponseWriter, r *http.Request) {
 		s.HandleError(w, http.StatusInternalServerError, r.URL.Path, err)
 		return
 	}
-	resp := &api.PersonResponse{
+	resp := &api.PersonResponseDto{
 		ID:            int(p.ID),
 		Nombre:        p.Name,
 		Edad:          p.Age,
@@ -96,8 +107,8 @@ func (s *Server) handleGetWithId(w http.ResponseWriter, r *http.Request) {
 	s.logger.Info(http.StatusOK, r.URL.Path, start)
 }
 
-func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
-	var p api.PersonRequest
+func (s *Server) handleCreatePerson(w http.ResponseWriter, r *http.Request) {
+	var p api.PersonRequestDto
 	err := json.NewDecoder(r.Body).Decode(&p)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -112,7 +123,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	pResponse := &api.PersonResponse{
+	pResponse := &api.PersonResponseDto{
 		ID:            int(person.ID),
 		Nombre:        person.Name,
 		Edad:          person.Age,
@@ -128,8 +139,8 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	w.Write(result)
 }
 
-func (s *Server) handlePut(w http.ResponseWriter, r *http.Request) {
-	var p api.PersonRequest
+func (s *Server) handleEditPerson(w http.ResponseWriter, r *http.Request) {
+	var p api.PersonRequestDto
 	err := json.NewDecoder(r.Body).Decode(&p)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -156,7 +167,7 @@ func (s *Server) handlePut(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	pResponse := &api.PersonResponse{
+	pResponse := &api.PersonResponseDto{
 		ID:            int(person.ID),
 		Nombre:        person.Name,
 		Edad:          person.Age,
@@ -172,7 +183,7 @@ func (s *Server) handlePut(w http.ResponseWriter, r *http.Request) {
 	w.Write(result)
 }
 
-func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDeletePerson(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id, err := strconv.ParseInt(vars["id"], 10, 32)
 	if err != nil {

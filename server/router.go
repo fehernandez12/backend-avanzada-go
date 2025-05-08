@@ -14,5 +14,7 @@ func (s *Server) router() http.Handler {
 		"/people/{id}",
 		s.HandlePeopleWithId,
 	).Methods(http.MethodGet, http.MethodPut, http.MethodDelete)
+	router.HandleFunc("/kills", s.HandleKills).Methods(http.MethodGet)
+	router.HandleFunc("/kills/{id}", s.HandleKillsWithId).Methods(http.MethodPost)
 	return router
 }
