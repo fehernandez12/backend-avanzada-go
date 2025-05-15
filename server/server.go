@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/gorilla/handlers"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -46,10 +47,16 @@ func NewServer() *Server {
 func (s *Server) StartServer() {
 	fmt.Println("Inicializando base de datos...")
 	s.initDB()
+	fmt.Println("Configurando CORS...")
+	corsObj := handlers.CORS(
+		handlers.AllowedOrigins([]string{"*"}),
+		handlers.AllowedMethods([]string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}),
+		handlers.AllowedHeaders([]string{"X-Requested-With", "Content-Type"}),
+	)
 	fmt.Println("Inicializando mux...")
 	srv := &http.Server{
 		Addr:    s.Config.Address,
-		Handler: s.router(),
+		Handler: corsObj(s.router()),
 	}
 	fmt.Println("Escuchando en el puerto ", s.Config.Address)
 	if err := srv.ListenAndServe(); err != nil {
